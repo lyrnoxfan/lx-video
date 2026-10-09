@@ -58,11 +58,11 @@ val TimeTotalStyle = TimeStyle.copy(
 /** 深色毛玻璃面板。
  * 注：Compose 内没有真正的 backdrop blur（Modifier.blur 只模糊自身），
  * 这里用半透明底 + 高光描边 + 顶部渐隐来模拟 iOS 液态玻璃质感。 */
-fun Modifier.glassDark(corner: Dp = 20.dp, alpha: Float = 0.45f): Modifier =
+fun Modifier.glassDark(corner: Dp = 20.dp, alpha: Float = 0.45f, borderWidth: Dp = 1.dp): Modifier =
     this
         .clip(RoundedCornerShape(corner))
         .background(Color.Black.copy(alpha = alpha))
-        .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(corner))
+        .border(borderWidth, Color.White.copy(alpha = 0.14f), RoundedCornerShape(corner))
 
 /** Android 12+ 才有 RenderEffect 硬件模糊；低版本直接返回原 Modifier 兜底 */
 fun Modifier.blurIfSupported(radius: Dp): Modifier =

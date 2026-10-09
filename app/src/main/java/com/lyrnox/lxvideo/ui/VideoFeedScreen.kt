@@ -10,12 +10,14 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
@@ -45,6 +47,7 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.IosShare
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
@@ -118,7 +121,6 @@ import com.lyrnox.lxvideo.data.VideoStore
 import com.lyrnox.lxvideo.ui.theme.Blue
 import com.lyrnox.lxvideo.ui.theme.FavGold
 import com.lyrnox.lxvideo.ui.theme.LikeRed
-import com.lyrnox.lxvideo.ui.theme.Pink
 import com.lyrnox.lxvideo.ui.theme.PinkBlueBrush
 import com.lyrnox.lxvideo.ui.theme.Sub
 import com.lyrnox.lxvideo.ui.theme.TimeStyle
@@ -268,12 +270,26 @@ fun VideoFeedScreen(
 
     ModalNavigationDrawer(
         drawerState = drawerState,
+        // 不透的深色 scrim：防止底下视频页的控件（如点赞红心）透出虚影
+        scrimColor = Color.Black.copy(alpha = 0.62f),
         drawerContent = {
             ModalDrawerSheet(
-                drawerContainerColor = Color(0xFF0B1220).copy(alpha = 0.82f),
+                // 毛玻璃质感：半透明纵向渐变（与顶栏胶囊统一），容器本身透明
+                drawerContainerColor = Color.Transparent,
                 drawerContentColor = Color.White,
                 modifier = Modifier.statusBarsPadding(),
             ) {
+                Column(
+                    modifier = Modifier.fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(
+                                    Color(0xFF182642).copy(alpha = 0.96f),
+                                    Color(0xFF0B1220).copy(alpha = 0.98f),
+                                ),
+                            ),
+                        ),
+                ) {
                 // 抽屉头部：粉蓝渐变标题
                 Text(
                     "LX视频",
@@ -326,6 +342,7 @@ fun VideoFeedScreen(
                         showAbout = true
                     },
                 )
+                }
             }
         },
     ) {
@@ -391,8 +408,9 @@ fun VideoFeedScreen(
                     ) {
                         Row(
                             modifier = Modifier.fillMaxWidth()
+                                .height(52.dp)
                                 .glassDark(999.dp, alpha = 0.38f)
-                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             IconButton(onClick = { scope.launch { drawerState.open() } }) {
@@ -546,17 +564,24 @@ private fun DrawerRow(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(label, color = Color.White, fontSize = 15.sp, modifier = Modifier.weight(1f))
                 if (trailing != null) {
-                    Text(trailing, color = Blue, fontSize = 13.sp)
+                    // 状态文字用粉蓝渐变
+                    Text(
+                        trailing,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        style = TextStyle(brush = PinkBlueBrush),
+                    )
                 }
             }
         },
-        icon = { Icon(icon, null, tint = Color.White.copy(alpha = 0.85f)) },
+        icon = { Icon(icon, null, tint = Color.White.copy(alpha = 0.85f), modifier = Modifier.size(24.dp)) },
         selected = false,
         onClick = onClick,
         colors = NavigationDrawerItemDefaults.colors(
             unselectedContainerColor = Color.Transparent,
         ),
-        modifier = Modifier.padding(horizontal = 8.dp),
+        // 统一 56dp 行高；按压涟漪为 NavigationDrawerItem 内置反馈
+        modifier = Modifier.padding(horizontal = 8.dp).height(56.dp),
     )
 }
 
@@ -662,7 +687,7 @@ fun AboutDialog(onDismiss: () -> Unit) {
         },
         text = {
             Text(
-                "LX视频 v1.3.0\n本地短视频播放器，视频来自你的 Polydrive。\n点赞 / 收藏 / 观看历史只保存在本机，不上传。",
+                "LX视频 v1.4.0\n本地短视频播放器，视频来自你的 Polydrive。\n点赞 / 收藏 / 观看历史只保存在本机，不上传。",
                 color = Color.White.copy(alpha = 0.75f),
                 fontSize = 13.sp,
                 lineHeight = 20.sp,
@@ -686,20 +711,20 @@ private fun ActionItem(
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
             modifier = Modifier.size(50.dp)
-                .then(if (glow != null) Modifier.shadow(12.dp, CircleShape, ambientColor = glow.copy(alpha = 0.5f)) else Modifier)
-                .glassDark(999.dp, alpha = 0.42f)
+                .then(if (glow != null) Modifier.shadow(8.dp, CircleShape, ambientColor = glow.copy(alpha = 0.35f)) else Modifier)
+                .glassDark(999.dp, alpha = 0.42f, borderWidth = 1.5.dp)
                 .pressScale(onClick = onClick),
             contentAlignment = Alignment.Center,
         ) {
             Icon(icon, desc, tint = tint, modifier = Modifier.size(26.dp))
         }
         if (count != null) {
-            Spacer(Modifier.height(3.dp))
+            Spacer(Modifier.height(2.dp))
             Text(
                 count,
                 style = TextStyle(
                     fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold,
+                    fontWeight = FontWeight.Medium,
                     color = Color.White.copy(alpha = 0.9f),
                     fontFeatureSettings = "tnum",
                 ),
@@ -830,15 +855,21 @@ private fun FeedPage(
             RefinedSpinner()
         }
 
-        if (isCurrent && !playing && !buffering && errMsg == null) {
+        // 暂停指示器：小号深色圆 + 白三角，200ms 淡入淡出（轻量化，不挡画面）
+        AnimatedVisibility(
+            visible = isCurrent && !playing && !buffering && errMsg == null,
+            enter = fadeIn(tween(200)),
+            exit = fadeOut(tween(200)),
+        ) {
             Box(
-                modifier = Modifier.size(76.dp)
+                modifier = Modifier.size(72.dp)
                     .clip(CircleShape)
-                    .background(Color.White.copy(alpha = 0.92f))
-                    .shadow(16.dp, CircleShape, ambientColor = Color.White.copy(alpha = 0.4f)),
+                    .background(Color.Black.copy(alpha = 0.45f))
+                    .border(1.dp, Color.White.copy(alpha = 0.18f), CircleShape)
+                    .shadow(12.dp, CircleShape, ambientColor = Color.Black.copy(alpha = 0.4f)),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.Filled.PlayArrow, "播放", tint = Blue, modifier = Modifier.size(42.dp))
+                Icon(Icons.Filled.PlayArrow, "播放", tint = Color.White, modifier = Modifier.size(34.dp))
             }
         }
 
@@ -926,7 +957,7 @@ private fun FeedPage(
                 )
                 Spacer(Modifier.height(12.dp))
                 ActionItem(
-                    icon = Icons.AutoMirrored.Filled.Redo,
+                    icon = Icons.Filled.IosShare,
                     desc = "分享",
                     onClick = { shareVideo(ctx, video) },
                 )
@@ -985,9 +1016,19 @@ private fun FeedPage(
                     valueRange = 0f..durF,
                     enabled = duration > 0,
                     thumb = {
+                        // 白圆点 + 极淡外发光，拖动时放大 1.2 倍
+                        val thumbScale by animateFloatAsState(
+                            targetValue = if (seeking) 1.2f else 1f,
+                            animationSpec = tween(150),
+                            label = "thumbScale",
+                        )
                         Box(
                             Modifier.size(15.dp)
-                                .shadow(10.dp, CircleShape, ambientColor = Pink.copy(alpha = 0.8f), spotColor = Pink)
+                                .graphicsLayer {
+                                    scaleX = thumbScale
+                                    scaleY = thumbScale
+                                }
+                                .shadow(8.dp, CircleShape, ambientColor = Color.White.copy(alpha = 0.35f))
                                 .background(Color.White, CircleShape),
                         )
                     },

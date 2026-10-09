@@ -218,18 +218,18 @@ private fun NavTab(
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier.pressScale(onClick = onClick)
-            .padding(horizontal = 18.dp, vertical = 8.dp),
+            .padding(horizontal = 18.dp, vertical = 6.dp),
     ) {
         Icon(
             icon,
             label,
-            tint = if (selected) Color.White else Color.White.copy(alpha = 0.45f),
+            tint = if (selected) Color.White else Color.White.copy(alpha = 0.4f),
             modifier = Modifier.size(24.dp),
         )
         Spacer(Modifier.height(2.dp))
         Text(
             label,
-            color = if (selected) Color.White else Color.White.copy(alpha = 0.45f),
+            color = if (selected) Color.White else Color.White.copy(alpha = 0.4f),
             fontSize = 11.sp,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
         )
