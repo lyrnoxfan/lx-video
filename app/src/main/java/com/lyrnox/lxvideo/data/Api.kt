@@ -9,6 +9,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
@@ -38,7 +39,7 @@ class Api(baseUrl: String) {
         .writeTimeout(180, TimeUnit.SECONDS)
         .build()
 
-    private suspend fun call(method: String, path: String, json: JSONObject? = null): JSONObject =
+    private suspend fun callRaw(method: String, path: String, json: JSONObject? = null): String =
         withContext(Dispatchers.IO) {
             val body = json?.toString()?.toRequestBody("application/json".toMediaType())
             val rb = Request.Builder().url(base + path)
@@ -57,9 +58,14 @@ class Api(baseUrl: String) {
                     }
                     throw ApiException(msg)
                 }
-                if (txt.isBlank()) JSONObject() else JSONObject(txt)
+                txt
             }
         }
+
+    private suspend fun call(method: String, path: String, json: JSONObject? = null): JSONObject {
+        val txt = callRaw(method, path, json)
+        return if (txt.isBlank()) JSONObject() else JSONObject(txt)
+    }
 
     // ---------- 认证 ----------
     suspend fun login(password: String) {
@@ -67,12 +73,9 @@ class Api(baseUrl: String) {
     }
 
     // ---------- 视频 feed ----------
-    /** 短视频 feed：服务端按 mime/扩展名递归筛视频，url 为可直接播放的签名直链 */
+    /** 短视频 feed：服务端返回顶层 JSON 数组，url 为可直接播放的签名直链 */
     suspend fun getVideos(): List<VideoItem> {
-        val j = call("GET", "/api/videos")
-        val out = mutableListOf<VideoItem>()
-        val arr = j.optJSONArray("videos")
-        if (arr != null) for (i in 0 until arr.length()) out += arr.getJSONObject(i).toVideoItem()
-        return out
+        val arr = JSONArray(callRaw("GET", "/api/videos"))
+        return List(arr.length()) { i -> arr.getJSONObject(i).toVideoItem() }
     }
 }
