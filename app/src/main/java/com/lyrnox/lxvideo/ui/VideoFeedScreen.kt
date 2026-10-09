@@ -1,8 +1,10 @@
 package com.lyrnox.lxvideo.ui
 
+import android.app.Activity
 import android.app.DownloadManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.net.Uri
 import android.os.Environment
 import android.widget.Toast
@@ -87,6 +89,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -98,6 +101,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -108,11 +112,13 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
+import androidx.media3.common.VideoSize
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import com.lyrnox.lxvideo.R
 import com.lyrnox.lxvideo.data.PlayerCache
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
@@ -152,10 +158,19 @@ fun VideoFeedScreen(
     paused: Boolean,
     jumpId: String?,
     onJumpDone: () -> Unit,
+    isFullscreen: Boolean,
+    onFullscreenChange: (Boolean) -> Unit,
+    onZoomedChange: (Boolean) -> Unit,
 ) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val store = remember(ctx) { VideoStore.get(ctx) }
+    val activity = ctx as? Activity
+
+    // 双指缩放状态（hoist 到本层：翻页/退出全屏时重置；>1x 时禁用翻页并上报给 MainActivity 藏底栏）
+    val zoom = remember { ZoomState() }
+    val zoomed = zoom.zoomed
+    LaunchedEffect(zoomed) { onZoomedChange(zoomed) }
 
     LaunchedEffect(Unit) {
         if (vm.videos.isEmpty() && !vm.loading) vm.refresh()
@@ -201,9 +216,10 @@ fun VideoFeedScreen(
     var lastPage by remember { mutableStateOf(0) }
     var speedIdx by remember { mutableStateOf(0) }
 
-    // 切页：先保存切走页面的进度；换 mediaItem；断点续播；自动播放
+    // 切页：先保存切走页面的进度；换 mediaItem；断点续播；自动播放；缩放重置回 1x
     LaunchedEffect(page, items) {
         if (items.isEmpty() || page >= items.size) return@LaunchedEffect
+        zoom.reset()
         videos.getOrNull(lastPage)?.let { prev ->
             val p = player.currentPosition
             val d = player.duration
@@ -236,6 +252,61 @@ fun VideoFeedScreen(
     var showAbout by remember { mutableStateOf(false) }
     // 控制层（顶栏/右侧栏/底部条）显隐：点按显示，播放中 3 秒无操作自动淡出
     var controlsVisible by remember { mutableStateOf(true) }
+
+    // 全屏极简控制层显隐（轻点画面切换，3 秒无操作自动淡出）
+    var fsControlsVisible by remember { mutableStateOf(false) }
+    LaunchedEffect(isFullscreen, fsControlsVisible) {
+        if (isFullscreen && fsControlsVisible) {
+            delay(3000)
+            fsControlsVisible = false
+        }
+    }
+
+    /** 按当前视频横竖屏设置全屏方向：横屏视频转横屏，竖屏保持竖屏 */
+    fun applyFsOrientation() {
+        val vs = player.videoSize
+        activity?.requestedOrientation = if (vs.width > vs.height && vs.height > 0) {
+            ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        } else {
+            ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+        }
+    }
+
+    // 进入/退出全屏：重置缩放、收起弹窗、切控制层、转方向
+    LaunchedEffect(isFullscreen) {
+        zoom.reset()
+        if (isFullscreen) {
+            showList = false
+            showLib = false
+            showAbout = false
+            searching = false
+            controlsVisible = false
+            fsControlsVisible = true
+            applyFsOrientation()
+        } else {
+            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            controlsVisible = true
+        }
+    }
+
+    // 全屏时视频元数据后到（如 moov 在尾部）：按实际横竖屏修正方向
+    val fsNow by rememberUpdatedState(isFullscreen)
+    DisposableEffect(player) {
+        val sizeListener = object : Player.Listener {
+            override fun onVideoSizeChanged(videoSize: VideoSize) {
+                if (fsNow && videoSize.width > 0) {
+                    activity?.requestedOrientation =
+                        if (videoSize.width > videoSize.height) {
+                            ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                        } else {
+                            ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+                        }
+                }
+            }
+        }
+        player.addListener(sizeListener)
+        onDispose { player.removeListener(sizeListener) }
+    }
 
     /** 跳到指定视频 id 所在的页 */
     fun jumpTo(id: String) {
@@ -381,6 +452,8 @@ fun VideoFeedScreen(
                     VerticalPager(
                         state = pagerState,
                         modifier = Modifier.fillMaxSize(),
+                        // 放大时禁用翻页（单指改为拖动画布），回到 1x 恢复
+                        userScrollEnabled = !zoomed,
                     ) { idx ->
                         FeedPage(
                             video = videos[idx],
@@ -394,12 +467,17 @@ fun VideoFeedScreen(
                                 speedIdx = (speedIdx + 1) % SPEEDS.size
                                 player.playbackParameters = PlaybackParameters(SPEEDS[speedIdx])
                             },
+                            isFullscreen = isFullscreen,
+                            fsControlsVisible = fsControlsVisible,
+                            onFsControlsChange = { fsControlsVisible = it },
+                            onExitFullscreen = { onFullscreenChange(false) },
+                            zoom = zoom,
                         )
                     }
 
-                    // 顶栏：悬浮毛玻璃胶囊（左菜单 / 右搜索）
+                    // 顶栏：悬浮毛玻璃胶囊（左菜单 / 右全屏+搜索）；全屏或放大时隐藏
                     AnimatedVisibility(
-                        visible = controlsVisible && !searching,
+                        visible = controlsVisible && !searching && !isFullscreen && !zoomed,
                         enter = fadeIn(),
                         exit = fadeOut(),
                         modifier = Modifier.fillMaxWidth()
@@ -424,6 +502,14 @@ fun VideoFeedScreen(
                                 fontWeight = FontWeight.SemiBold,
                             )
                             Spacer(Modifier.weight(1f))
+                            IconButton(onClick = { onFullscreenChange(true) }) {
+                                Icon(
+                                    painterResource(R.drawable.ic_fullscreen),
+                                    "全屏",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(22.dp),
+                                )
+                            }
                             IconButton(onClick = { searching = true }) {
                                 Icon(Icons.Filled.Search, "搜索", tint = Color.White)
                             }
@@ -745,6 +831,11 @@ private fun FeedPage(
     onControlsChange: (Boolean) -> Unit,
     speedLabel: String,
     onSpeedClick: () -> Unit,
+    isFullscreen: Boolean,
+    fsControlsVisible: Boolean,
+    onFsControlsChange: (Boolean) -> Unit,
+    onExitFullscreen: () -> Unit,
+    zoom: ZoomState,
 ) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -820,16 +911,20 @@ private fun FeedPage(
 
     Box(
         modifier = Modifier.fillMaxSize()
-            .pointerInput(isCurrent, errMsg) {
+            .pointerInput(isCurrent, errMsg, isFullscreen, fsControlsVisible) {
                 detectTapGestures(
-                    // 单击：先唤出控制层，再播放/暂停
+                    // 单击：全屏里只切换极简控制层；普通模式先唤出控制层，再播放/暂停
                     onTap = {
                         if (isCurrent && errMsg == null) {
-                            onControlsChange(true)
-                            player?.let { if (it.isPlaying) it.pause() else it.play() }
+                            if (isFullscreen) {
+                                onFsControlsChange(!fsControlsVisible)
+                            } else {
+                                onControlsChange(true)
+                                player?.let { if (it.isPlaying) it.pause() else it.play() }
+                            }
                         }
                     },
-                    // 双击：点赞 + 弹性红心动画
+                    // 双击：点赞 + 弹性红心动画（缩放手势另行处理，不做双击缩放）
                     onDoubleTap = {
                         if (isCurrent && errMsg == null) {
                             burst++
@@ -840,14 +935,10 @@ private fun FeedPage(
             },
         contentAlignment = Alignment.Center,
     ) {
-        AndroidView(
-            factory = { c ->
-                PlayerView(c).apply {
-                    useController = false
-                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-                }
-            },
-            update = { it.player = player },
+        // 可缩放播放器（TextureView + 双指缩放；放大时纯画面）
+        ZoomableVideo(
+            player = player,
+            zoom = zoom,
             modifier = Modifier.fillMaxSize(),
         )
 
@@ -929,7 +1020,7 @@ private fun FeedPage(
 
         // 右侧竖排操作栏：毛玻璃圆钮，点按控制层时淡入淡出
         AnimatedVisibility(
-            visible = isCurrent && errMsg == null && controlsVisible,
+            visible = isCurrent && errMsg == null && controlsVisible && !isFullscreen && !zoom.zoomed,
             enter = fadeIn(),
             exit = fadeOut(),
             modifier = Modifier.align(Alignment.CenterEnd),
@@ -981,7 +1072,7 @@ private fun FeedPage(
 
         // 底部：等宽时间 + 发光细进度条（可拖动），随控制层淡入淡出
         AnimatedVisibility(
-            visible = isCurrent && errMsg == null && controlsVisible,
+            visible = isCurrent && errMsg == null && controlsVisible && !isFullscreen && !zoom.zoomed,
             enter = fadeIn(),
             exit = fadeOut(),
             modifier = Modifier.align(Alignment.BottomCenter),
@@ -1064,6 +1155,86 @@ private fun FeedPage(
                     ),
                     modifier = Modifier.fillMaxWidth(),
                 )
+            }
+        }
+
+        // 全屏极简控制层：右上退出按钮 + 底部细进度条（可拖）；轻点画面切换，3 秒自动淡出
+        AnimatedVisibility(
+            visible = isCurrent && isFullscreen && fsControlsVisible && errMsg == null,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            Box(Modifier.fillMaxSize()) {
+                IconButton(
+                    onClick = onExitFullscreen,
+                    modifier = Modifier.align(Alignment.TopEnd)
+                        .padding(top = 56.dp, end = 16.dp)
+                        .size(44.dp)
+                        .glassDark(999.dp, alpha = 0.42f),
+                ) {
+                    Icon(
+                        painterResource(R.drawable.ic_fullscreen_exit),
+                        "退出全屏",
+                        tint = Color.White,
+                        modifier = Modifier.size(22.dp),
+                    )
+                }
+                val fsPos = if (seeking) seekPos else position
+                val fsDurF = duration.toFloat().coerceAtLeast(1f)
+                Slider(
+                    value = fsPos.toFloat().coerceIn(0f, fsDurF),
+                    onValueChange = { seeking = true; seekPos = it.toLong() },
+                    onValueChangeFinished = {
+                        player?.seekTo(seekPos)
+                        position = seekPos
+                        seeking = false
+                    },
+                    valueRange = 0f..fsDurF,
+                    enabled = duration > 0,
+                    thumb = {
+                        Box(Modifier.size(12.dp).background(Color.White, CircleShape))
+                    },
+                    track = { sliderState ->
+                        Box(
+                            Modifier.fillMaxWidth().height(3.dp)
+                                .clip(RoundedCornerShape(2.dp)),
+                        ) {
+                            Box(Modifier.fillMaxSize().background(Color.White.copy(alpha = 0.25f)))
+                            val frac = (sliderState.value / fsDurF).coerceIn(0f, 1f)
+                            Box(
+                                Modifier.fillMaxHeight().fillMaxWidth(frac)
+                                    .background(PinkBlueBrush),
+                            )
+                        }
+                    },
+                    colors = SliderDefaults.colors(
+                        activeTrackColor = Color.Transparent,
+                        inactiveTrackColor = Color.Transparent,
+                    ),
+                    modifier = Modifier.align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp)
+                        .padding(bottom = 48.dp),
+                )
+            }
+        }
+
+        // 放大时右下角 "1x" 一键复位（仅放大时显示）
+        AnimatedVisibility(
+            visible = isCurrent && zoom.zoomed && errMsg == null,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier.align(Alignment.BottomEnd),
+        ) {
+            Box(
+                modifier = Modifier.padding(end = 16.dp, bottom = 110.dp)
+                    .size(46.dp)
+                    .glassDark(999.dp, alpha = 0.42f)
+                    .pressScale(onClick = { zoom.reset() }),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("1x", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
             }
         }
     }

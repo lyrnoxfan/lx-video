@@ -1,10 +1,14 @@
 package com.lyrnox.lxvideo
 
+import android.app.Activity
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -38,7 +42,10 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -99,8 +106,30 @@ class MainActivity : ComponentActivity() {
                         // 没有消息后端，所以不做"消息"tab（UI 不许谎报）。
                         var tab by remember { mutableIntStateOf(0) }
                         var jumpId by remember { mutableStateOf<String?>(null) }
+                        // 全屏 / 缩放状态（VideoFeedScreen 上报）
+                        var isFullscreen by remember { mutableStateOf(false) }
+                        var zoomed by remember { mutableStateOf(false) }
+                        // 返回键：全屏时优先退出全屏，其次"我"页回首页，最后退 App
                         BackHandler {
-                            if (tab == 1) tab = 0 else finish()
+                            when {
+                                isFullscreen -> isFullscreen = false
+                                tab == 1 -> tab = 0
+                                else -> finish()
+                            }
+                        }
+                        // 全屏时隐藏系统状态栏+导航栏（滑动短暂唤出），退出时恢复
+                        val activity = LocalContext.current as Activity
+                        LaunchedEffect(isFullscreen) {
+                            val controller = WindowInsetsControllerCompat(
+                                activity.window, activity.window.decorView,
+                            )
+                            if (isFullscreen) {
+                                controller.hide(WindowInsetsCompat.Type.systemBars())
+                                controller.systemBarsBehavior =
+                                    WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                            } else {
+                                controller.show(WindowInsetsCompat.Type.systemBars())
+                            }
                         }
 
                         Box(
@@ -113,6 +142,9 @@ class MainActivity : ComponentActivity() {
                                 paused = tab == 1,
                                 jumpId = jumpId,
                                 onJumpDone = { jumpId = null },
+                                isFullscreen = isFullscreen,
+                                onFullscreenChange = { isFullscreen = it },
+                                onZoomedChange = { zoomed = it },
                             )
                             // "我"页盖在视频流之上
                             if (tab == 1) {
@@ -124,9 +156,15 @@ class MainActivity : ComponentActivity() {
                                     },
                                 )
                             }
-                            // 悬浮毛玻璃底栏
+                            // 悬浮毛玻璃底栏：全屏或放大时隐藏（纯画面）
+                            AnimatedVisibility(
+                                visible = !isFullscreen && !zoomed,
+                                enter = fadeIn(),
+                                exit = fadeOut(),
+                                modifier = Modifier.align(Alignment.BottomCenter),
+                            ) {
                             Row(
-                                modifier = Modifier.align(Alignment.BottomCenter)
+                                modifier = Modifier
                                     .fillMaxWidth()
                                     .navigationBarsPadding()
                                     .padding(horizontal = 88.dp, vertical = 14.dp)
@@ -147,6 +185,7 @@ class MainActivity : ComponentActivity() {
                                     selected = tab == 1,
                                     onClick = { tab = 1 },
                                 )
+                            }
                             }
                         }
                     }
