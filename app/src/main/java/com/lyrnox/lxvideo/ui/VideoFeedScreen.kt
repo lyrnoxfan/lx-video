@@ -105,8 +105,12 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import com.lyrnox.lxvideo.data.PlayerCache
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.lyrnox.lxvideo.data.VideoItem
@@ -155,12 +159,26 @@ fun VideoFeedScreen(
         if (vm.videos.isEmpty() && !vm.loading) vm.refresh()
     }
 
-    // 单个 ExoPlayer 实例，页间复用；离开页面释放
+    // 单个 ExoPlayer 实例，页间复用；离开页面释放。
+    // 磁盘缓存 2GB：播过的内容按分片存本地，重复看/拖进度直接读本地。
+    // 缓存 key 用视频 id（签名 URL 7 天一换，id 稳定，缓存长期有效）。
+    // 缓冲策略按慢网络调优：尽快起播（1.5s），播起来后多囤（30s~120s）扛抖动。
     val player = remember(ctx) {
         val loadControl = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(15_000, 60_000, 1_000, 2_000)
+            .setBufferDurationsMs(30_000, 120_000, 1_500, 3_000)
+            .setPrioritizeTimeOverSizeThresholds(true)
             .build()
-        ExoPlayer.Builder(ctx).setLoadControl(loadControl).build()
+        val cacheFactory = CacheDataSource.Factory()
+            .setCache(PlayerCache.get(ctx.applicationContext))
+            .setUpstreamDataSourceFactory(
+                DefaultHttpDataSource.Factory().setUserAgent(
+                    "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36 LXVideo/1.3.1"
+                )
+            )
+        ExoPlayer.Builder(ctx)
+            .setLoadControl(loadControl)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(cacheFactory))
+            .build()
     }
     DisposableEffect(Unit) {
         onDispose { player.release() }
@@ -172,7 +190,10 @@ fun VideoFeedScreen(
     }
 
     val videos = vm.videos
-    val items = remember(videos) { videos.map { MediaItem.fromUri(it.url) } }
+    // customCacheKey 用视频 id：签名 URL 会过期轮换，id 稳定，磁盘缓存长期有效
+    val items = remember(videos) {
+        videos.map { MediaItem.Builder().setUri(it.url).setCustomCacheKey(it.id).build() }
+    }
     val pagerState = rememberPagerState(pageCount = { videos.size })
     val page = pagerState.currentPage
     var lastPage by remember { mutableStateOf(0) }
