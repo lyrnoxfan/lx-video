@@ -2,16 +2,25 @@ package com.lyrnox.lxvideo
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -25,6 +34,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.lyrnox.lxvideo.data.Api
+import com.lyrnox.lxvideo.ui.MeScreen
 import com.lyrnox.lxvideo.ui.VideoFeedScreen
 import com.lyrnox.lxvideo.ui.VideoFeedVMFactory
 import com.lyrnox.lxvideo.ui.VideoFeedViewModel
@@ -70,7 +80,64 @@ class MainActivity : ComponentActivity() {
                         val vm: VideoFeedViewModel =
                             viewModel(factory = remember(current) { VideoFeedVMFactory(current) })
                         LaunchedEffect(current) { vm.onUnauthorized = ::onUnauthorized }
-                        VideoFeedScreen(vm = vm, onBack = { finish() })
+
+                        // 底部导航：只有「首页 / 我」。注意：这是单用户本地播放器，
+                        // 没有消息后端，所以不做"消息"tab（UI 不许谎报）。
+                        var tab by remember { mutableIntStateOf(0) }
+                        var jumpId by remember { mutableStateOf<String?>(null) }
+                        BackHandler {
+                            if (tab == 1) tab = 0 else finish()
+                        }
+
+                        Box(
+                            Modifier.fillMaxSize()
+                                .background(Color.Black),
+                        ) {
+                            // 首页视频流：切到"我"时暂停但保留在组合中（进度/页码不丢）
+                            VideoFeedScreen(
+                                vm = vm,
+                                paused = tab == 1,
+                                jumpId = jumpId,
+                                onJumpDone = { jumpId = null },
+                            )
+                            // "我"页盖在视频流之上
+                            if (tab == 1) {
+                                MeScreen(
+                                    videos = vm.videos,
+                                    onPickVideo = { id ->
+                                        jumpId = id
+                                        tab = 0
+                                    },
+                                )
+                            }
+                            // 底部导航栏（常驻）
+                            NavigationBar(
+                                containerColor = Color.Black,
+                                modifier = Modifier.align(Alignment.BottomCenter),
+                            ) {
+                                val colors = NavigationBarItemDefaults.colors(
+                                    selectedIconColor = Color.White,
+                                    selectedTextColor = Color.White,
+                                    unselectedIconColor = Color.White.copy(alpha = 0.45f),
+                                    unselectedTextColor = Color.White.copy(alpha = 0.45f),
+                                    indicatorColor = Color.Transparent,
+                                )
+                                NavigationBarItem(
+                                    selected = tab == 0,
+                                    onClick = { tab = 0 },
+                                    icon = { Icon(Icons.Filled.Home, "首页") },
+                                    label = { Text("首页") },
+                                    colors = colors,
+                                )
+                                NavigationBarItem(
+                                    selected = tab == 1,
+                                    onClick = { tab = 1 },
+                                    icon = { Icon(Icons.Filled.Person, "我") },
+                                    label = { Text("我") },
+                                    colors = colors,
+                                )
+                            }
+                        }
                     }
                     err != null -> GradientBackground {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

@@ -6,7 +6,6 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Environment
 import android.widget.Toast
-import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
@@ -30,29 +29,44 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.automirrored.filled.Redo
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.NavigationDrawerItem
+import androidx.compose.material3.NavigationDrawerItemDefaults
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -71,6 +85,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -106,13 +121,20 @@ private fun speedLabel(s: Float) = when (s) {
     else -> "0.5x"
 }
 
+/** 底部导航栏高度预留，避免遮挡进度条 */
+private val NavBarReserve = 92.dp
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun VideoFeedScreen(vm: VideoFeedViewModel, onBack: () -> Unit) {
+fun VideoFeedScreen(
+    vm: VideoFeedViewModel,
+    paused: Boolean,
+    jumpId: String?,
+    onJumpDone: () -> Unit,
+) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val store = remember(ctx) { VideoStore.get(ctx) }
-    BackHandler { onBack() }
 
     LaunchedEffect(Unit) {
         if (vm.videos.isEmpty() && !vm.loading) vm.refresh()
@@ -127,6 +149,11 @@ fun VideoFeedScreen(vm: VideoFeedViewModel, onBack: () -> Unit) {
     }
     DisposableEffect(Unit) {
         onDispose { player.release() }
+    }
+
+    // 切到"我"页时暂停播放（保留进度和页码）
+    LaunchedEffect(paused) {
+        if (paused) player.pause()
     }
 
     val videos = vm.videos
@@ -162,8 +189,13 @@ fun VideoFeedScreen(vm: VideoFeedViewModel, onBack: () -> Unit) {
         lastPage = page
     }
 
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    var searching by remember { mutableStateOf(false) }
+    var query by remember { mutableStateOf("") }
     var showList by remember { mutableStateOf(false) }
     var showLib by remember { mutableStateOf(false) }
+    var libTab by remember { mutableStateOf(0) }
+    var showAbout by remember { mutableStateOf(false) }
 
     /** 跳到指定视频 id 所在的页 */
     fun jumpTo(id: String) {
@@ -172,232 +204,420 @@ fun VideoFeedScreen(vm: VideoFeedViewModel, onBack: () -> Unit) {
             Toast.makeText(ctx, "视频不在当前列表", Toast.LENGTH_SHORT).show()
             return
         }
+        showList = false
         showLib = false
+        searching = false
         vm.setIndex(i)
         scope.launch { pagerState.animateScrollToPage(i) }
     }
 
-    Box(Modifier.fillMaxSize().background(Color.Black)) {
-        when {
-            vm.loading && videos.isEmpty() -> Box(
-                Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center,
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    CircularProgressIndicator(color = Blue)
-                    Spacer(Modifier.height(12.dp))
-                    Text("正在加载视频…", color = Sub, fontSize = 13.sp)
-                }
-            }
-            vm.error != null && videos.isEmpty() -> Box(
-                Modifier.fillMaxSize().padding(32.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(vm.error ?: "", color = Color(0xFFDC2626))
-                    Spacer(Modifier.height(12.dp))
-                    TextButton(onClick = { vm.refresh() }) { Text("重试", color = Blue) }
-                }
-            }
-            videos.isEmpty() -> Box(
-                Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center,
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("暂无视频", color = Sub, fontSize = 15.sp)
-                    Spacer(Modifier.height(8.dp))
-                    TextButton(onClick = { vm.refresh() }) { Text("刷新", color = Blue) }
-                }
-            }
-            else -> {
-                VerticalPager(
-                    state = pagerState,
-                    modifier = Modifier.fillMaxSize(),
-                ) { idx ->
-                    FeedPage(
-                        video = videos[idx],
-                        player = if (idx == page) player else null,
-                        isCurrent = idx == page,
-                        store = store,
-                        speedLabel = speedLabel(SPEEDS[speedIdx]),
-                        onSpeedClick = {
-                            speedIdx = (speedIdx + 1) % SPEEDS.size
-                            player.playbackParameters = PlaybackParameters(SPEEDS[speedIdx])
-                        },
-                    )
-                }
-
-                // 顶部条：标题 + 随机/最新切换 + 收藏/历史 + 选视频
-                Row(
-                    modifier = Modifier.fillMaxWidth()
-                        .statusBarsPadding()
-                        .background(
-                            Brush.verticalGradient(
-                                listOf(Color.Black.copy(alpha = 0.55f), Color.Transparent),
-                            ),
-                        )
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        "刷视频",
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 17.sp,
-                        modifier = Modifier.padding(start = 8.dp),
-                    )
-                    Spacer(Modifier.weight(1f))
-                    TextButton(onClick = {
-                        vm.toggleOrder()
-                        scope.launch { pagerState.scrollToPage(0) }
-                    }) {
-                        Icon(
-                            Icons.Filled.Shuffle,
-                            contentDescription = null,
-                            tint = if (vm.order == FeedOrder.SHUFFLE) Blue else Color.White,
-                            modifier = Modifier.size(18.dp),
-                        )
-                        Spacer(Modifier.width(4.dp))
-                        Text(
-                            if (vm.order == FeedOrder.SHUFFLE) "随机" else "最新",
-                            color = if (vm.order == FeedOrder.SHUFFLE) Blue else Color.White,
-                            fontSize = 14.sp,
-                        )
-                    }
-                    IconButton(onClick = { showLib = true }) {
-                        Icon(Icons.Filled.History, "收藏/历史", tint = Color.White)
-                    }
-                    IconButton(onClick = { showList = true }) {
-                        Icon(Icons.AutoMirrored.Filled.List, "选视频", tint = Color.White)
-                    }
-                }
-            }
+    // 外部跳播请求（从"我"页点条目过来）
+    LaunchedEffect(jumpId) {
+        if (jumpId != null) {
+            jumpTo(jumpId)
+            onJumpDone()
         }
+    }
 
-        // 选视频列表（保留原有）
-        if (showList && videos.isNotEmpty()) {
-            ModalBottomSheet(
-                onDismissRequest = { showList = false },
-                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-                containerColor = Color(0xFF101826),
+    /** 打开抽屉里的列表弹窗：先关抽屉再弹 */
+    fun openSheet(tab: Int) {
+        scope.launch {
+            drawerState.close()
+            libTab = tab
+            showLib = true
+        }
+    }
+
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            ModalDrawerSheet(
+                drawerContainerColor = Color(0xFF101826),
+                modifier = Modifier.statusBarsPadding(),
             ) {
-                LazyColumn(Modifier.fillMaxWidth()) {
-                    itemsIndexed(videos) { i, v ->
+                // 抽屉头部
+                Text(
+                    "LX视频",
+                    color = Color.White,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
+                )
+                HorizontalDivider(color = Color.White.copy(alpha = 0.12f))
+                Spacer(Modifier.height(8.dp))
+                DrawerRow(
+                    icon = Icons.Filled.Shuffle,
+                    label = "播放顺序",
+                    trailing = if (vm.order == FeedOrder.SHUFFLE) "随机" else "最新",
+                    onClick = {
+                        vm.toggleOrder()
+                        scope.launch {
+                            drawerState.close()
+                            pagerState.scrollToPage(0)
+                        }
+                    },
+                )
+                DrawerRow(
+                    icon = Icons.AutoMirrored.Filled.List,
+                    label = "选择视频",
+                    onClick = {
+                        scope.launch {
+                            drawerState.close()
+                            showList = true
+                        }
+                    },
+                )
+                DrawerRow(
+                    icon = Icons.Filled.Star,
+                    label = "我的收藏",
+                    onClick = { openSheet(0) },
+                )
+                DrawerRow(
+                    icon = Icons.Filled.History,
+                    label = "观看历史",
+                    onClick = { openSheet(1) },
+                )
+                DrawerRow(
+                    icon = Icons.Filled.Info,
+                    label = "关于",
+                    onClick = {
+                        scope.launch { drawerState.close() }
+                        showAbout = true
+                    },
+                )
+            }
+        },
+    ) {
+        Box(Modifier.fillMaxSize().background(Color.Black)) {
+            when {
+                vm.loading && videos.isEmpty() -> Box(
+                    Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator(color = Blue)
+                        Spacer(Modifier.height(12.dp))
+                        Text("正在加载视频…", color = Sub, fontSize = 13.sp)
+                    }
+                }
+                vm.error != null && videos.isEmpty() -> Box(
+                    Modifier.fillMaxSize().padding(32.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(vm.error ?: "", color = Color(0xFFDC2626))
+                        Spacer(Modifier.height(12.dp))
+                        TextButton(onClick = { vm.refresh() }) { Text("重试", color = Blue) }
+                    }
+                }
+                videos.isEmpty() -> Box(
+                    Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("暂无视频", color = Sub, fontSize = 15.sp)
+                        Spacer(Modifier.height(8.dp))
+                        TextButton(onClick = { vm.refresh() }) { Text("刷新", color = Blue) }
+                    }
+                }
+                else -> {
+                    VerticalPager(
+                        state = pagerState,
+                        modifier = Modifier.fillMaxSize(),
+                    ) { idx ->
+                        FeedPage(
+                            video = videos[idx],
+                            player = if (idx == page) player else null,
+                            isCurrent = idx == page,
+                            store = store,
+                            speedLabel = speedLabel(SPEEDS[speedIdx]),
+                            onSpeedClick = {
+                                speedIdx = (speedIdx + 1) % SPEEDS.size
+                                player.playbackParameters = PlaybackParameters(SPEEDS[speedIdx])
+                            },
+                        )
+                    }
+
+                    // 顶栏：左汉堡菜单 / 右搜索
+                    if (!searching) {
                         Row(
                             modifier = Modifier.fillMaxWidth()
-                                .clickable {
-                                    showList = false
-                                    vm.setIndex(i)
-                                    scope.launch { pagerState.animateScrollToPage(i) }
-                                }
-                                .padding(horizontal = 16.dp, vertical = 10.dp),
+                                .statusBarsPadding()
+                                .background(
+                                    Brush.verticalGradient(
+                                        listOf(Color.Black.copy(alpha = 0.55f), Color.Transparent),
+                                    ),
+                                )
+                                .padding(horizontal = 4.dp, vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Text(
-                                v.name,
-                                color = Color.White,
-                                fontSize = 14.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
+                            IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                                Icon(Icons.Filled.Menu, "菜单", tint = Color.White)
+                            }
+                            Spacer(Modifier.weight(1f))
+                            IconButton(onClick = { searching = true }) {
+                                Icon(Icons.Filled.Search, "搜索", tint = Color.White)
+                            }
+                        }
+                    } else {
+                        // 搜索模式：返回 + 输入框
+                        Row(
+                            modifier = Modifier.fillMaxWidth()
+                                .statusBarsPadding()
+                                .background(Color.Black.copy(alpha = 0.85f))
+                                .padding(horizontal = 4.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            IconButton(onClick = { searching = false; query = "" }) {
+                                Icon(Icons.Filled.Close, "关闭搜索", tint = Color.White)
+                            }
+                            TextField(
+                                value = query,
+                                onValueChange = { query = it },
+                                placeholder = { Text("搜索视频名", color = Sub, fontSize = 15.sp) },
+                                singleLine = true,
+                                colors = TextFieldDefaults.colors(
+                                    focusedContainerColor = Color.Transparent,
+                                    unfocusedContainerColor = Color.Transparent,
+                                    focusedIndicatorColor = Color.Transparent,
+                                    unfocusedIndicatorColor = Color.Transparent,
+                                    focusedTextColor = Color.White,
+                                    unfocusedTextColor = Color.White,
+                                    cursorColor = Blue,
+                                ),
                                 modifier = Modifier.weight(1f),
                             )
-                            Spacer(Modifier.width(8.dp))
-                            Text(fmtSize(v.size), color = Sub, fontSize = 12.sp)
                         }
-                    }
-                    item { Spacer(Modifier.height(24.dp)) }
-                }
-            }
-        }
-
-        // 收藏 / 历史二合一弹窗
-        if (showLib && videos.isNotEmpty()) {
-            ModalBottomSheet(
-                onDismissRequest = { showLib = false },
-                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-                containerColor = Color(0xFF101826),
-            ) {
-                var tab by remember { mutableStateOf(0) }
-                TabRow(
-                    selectedTabIndex = tab,
-                    containerColor = Color.Transparent,
-                    contentColor = Color.White,
-                ) {
-                    Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("收藏") })
-                    Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("历史") })
-                }
-                val favIds by remember { store.favorites() }.collectAsState(initial = emptyList())
-                val hist by remember { store.history() }.collectAsState(initial = emptyList())
-                // 条目：(视频, 右侧小字)。收藏无小字，历史显示观看时间
-                val entries: List<Pair<VideoItem, String?>> = remember(tab, favIds, hist, videos) {
-                    if (tab == 0) {
-                        favIds.mapNotNull { id -> videos.find { it.id == id }?.let { it to null } }
-                    } else {
-                        hist.mapNotNull { h -> videos.find { it.id == h.id }?.let { it to fmtTime(h.ts) } }
-                    }
-                }
-                LazyColumn(Modifier.fillMaxWidth()) {
-                    if (entries.isEmpty()) {
-                        item {
-                            Box(
-                                Modifier.fillMaxWidth().padding(36.dp),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Text(
-                                    if (tab == 0) "还没有收藏" else "还没有观看历史",
-                                    color = Sub,
-                                    fontSize = 14.sp,
-                                )
-                            }
+                        // 搜索结果：按视频名本地过滤
+                        val results = remember(query, videos) {
+                            if (query.isBlank()) emptyList()
+                            else videos.filter { it.name.contains(query, ignoreCase = true) }
                         }
-                    } else {
-                        items(entries.size) { i ->
-                            val (v, extra) = entries[i]
-                            Row(
-                                modifier = Modifier.fillMaxWidth()
-                                    .clickable { jumpTo(v.id) }
-                                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Column(Modifier.weight(1f)) {
-                                    Text(
-                                        v.name,
-                                        color = Color.White,
-                                        fontSize = 14.sp,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                    Row {
-                                        Text(fmtSize(v.size), color = Sub, fontSize = 12.sp)
-                                        if (extra != null) {
-                                            Text("  ·  $extra", color = Sub, fontSize = 12.sp)
-                                        }
-                                        if (tab == 1) {
-                                            val h = hist.find { it.id == v.id }
-                                            if (h != null && h.pos > 5000) {
-                                                Text(
-                                                    "  ·  看到 ${fmtFeedMs(h.pos)}",
-                                                    color = Blue,
-                                                    fontSize = 12.sp,
-                                                )
-                                            }
-                                        }
+                        LazyColumn(
+                            modifier = Modifier.fillMaxWidth()
+                                .padding(top = 108.dp)
+                                .background(Color.Black.copy(alpha = 0.92f)),
+                        ) {
+                            if (results.isEmpty()) {
+                                item {
+                                    Box(
+                                        Modifier.fillMaxWidth().padding(24.dp),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Text("没有匹配的视频", color = Sub, fontSize = 14.sp)
                                     }
                                 }
-                                if (tab == 0) {
-                                    Icon(
-                                        Icons.Filled.Star,
-                                        null,
-                                        tint = Color(0xFFFFC107),
-                                        modifier = Modifier.size(18.dp),
+                            } else {
+                                items(results.size) { i ->
+                                    val v = results[i]
+                                    VideoEntryRow(
+                                        title = v.name,
+                                        subtitle = fmtSize(v.size),
+                                        onClick = { jumpTo(v.id) },
                                     )
                                 }
                             }
+                            item { Spacer(Modifier.height(16.dp)) }
                         }
+                    }
+                }
+            }
+
+            // 选视频列表
+            if (showList && videos.isNotEmpty()) {
+                VideoListSheet(
+                    title = "选择视频",
+                    onDismiss = { showList = false },
+                ) {
+                    itemsIndexed(videos) { i, v ->
+                        VideoEntryRow(
+                            title = v.name,
+                            subtitle = fmtSize(v.size),
+                            onClick = {
+                                showList = false
+                                vm.setIndex(i)
+                                scope.launch { pagerState.animateScrollToPage(i) }
+                            },
+                        )
                     }
                     item { Spacer(Modifier.height(24.dp)) }
                 }
             }
+
+            // 收藏 / 历史二合一弹窗
+            if (showLib && videos.isNotEmpty()) {
+                VideoListSheet(
+                    title = null,
+                    onDismiss = { showLib = false },
+                ) {
+                    item {
+                        TabRow(
+                            selectedTabIndex = libTab,
+                            containerColor = Color.Transparent,
+                            contentColor = Color.White,
+                        ) {
+                            Tab(selected = libTab == 0, onClick = { libTab = 0 }, text = { Text("收藏") })
+                            Tab(selected = libTab == 1, onClick = { libTab = 1 }, text = { Text("历史") })
+                        }
+                    }
+                    item {
+                        LibEntries(
+                            tab = libTab,
+                            videos = videos,
+                            store = store,
+                            onPick = { jumpTo(it) },
+                        )
+                    }
+                    item { Spacer(Modifier.height(24.dp)) }
+                }
+            }
+
+            if (showAbout) {
+                AboutDialog(onDismiss = { showAbout = false })
+            }
+        }
+    }
+}
+
+/** 抽屉里的一行 */
+@Composable
+private fun DrawerRow(
+    icon: ImageVector,
+    label: String,
+    trailing: String? = null,
+    onClick: () -> Unit,
+) {
+    NavigationDrawerItem(
+        label = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(label, color = Color.White, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                if (trailing != null) {
+                    Text(trailing, color = Blue, fontSize = 13.sp)
+                }
+            }
+        },
+        icon = { Icon(icon, null, tint = Color.White.copy(alpha = 0.85f)) },
+        selected = false,
+        onClick = onClick,
+        colors = NavigationDrawerItemDefaults.colors(
+            unselectedContainerColor = Color.Transparent,
+        ),
+        modifier = Modifier.padding(horizontal = 8.dp),
+    )
+}
+
+/** 深色底部弹窗容器 */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun VideoListSheet(
+    title: String?,
+    onDismiss: () -> Unit,
+    content: androidx.compose.foundation.lazy.LazyListScope.() -> Unit,
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = Color(0xFF101826),
+    ) {
+        if (title != null) {
+            Text(
+                title,
+                color = Color.White,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            )
+        }
+        LazyColumn(Modifier.fillMaxWidth(), content = content)
+    }
+}
+
+/** 收藏/历史条目列表（供抽屉弹窗和"我"页复用逻辑） */
+@Composable
+private fun LibEntries(
+    tab: Int,
+    videos: List<VideoItem>,
+    store: VideoStore,
+    onPick: (String) -> Unit,
+) {
+    val favIds by remember { store.favorites() }.collectAsState(initial = emptyList())
+    val hist by remember { store.history() }.collectAsState(initial = emptyList())
+    if (tab == 0) {
+        val favs = remember(favIds, videos) {
+            favIds.mapNotNull { id -> videos.find { it.id == id } }
+        }
+        if (favs.isEmpty()) {
+            EmptyHint("还没有收藏")
+        } else {
+            favs.forEach { v ->
+                VideoEntryRow(
+                    title = v.name,
+                    subtitle = fmtSize(v.size),
+                    onClick = { onPick(v.id) },
+                    trailing = {
+                        Icon(Icons.Filled.Star, null, tint = Color(0xFFFFC107), modifier = Modifier.size(18.dp))
+                    },
+                )
+            }
+        }
+    } else {
+        val hs = remember(hist, videos) {
+            hist.mapNotNull { h -> videos.find { it.id == h.id }?.let { it to h } }
+        }
+        if (hs.isEmpty()) {
+            EmptyHint("还没有观看历史")
+        } else {
+            hs.forEach { (v, h) ->
+                val sub = buildString {
+                    append(fmtSize(v.size))
+                    append("  ·  ${fmtTime(h.ts)}")
+                    if (h.pos > 5000) append("  ·  看到 ${fmtFeedMs(h.pos)}")
+                }
+                VideoEntryRow(
+                    title = v.name,
+                    subtitle = sub,
+                    onClick = { onPick(v.id) },
+                )
+            }
+        }
+    }
+}
+
+/** 关于弹窗：只说真实情况，不虚构功能 */
+@Composable
+fun AboutDialog(onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("知道了", color = Blue) }
+        },
+        title = { Text("关于", color = Color.White) },
+        text = {
+            Text(
+                "LX视频 v1.2.0\n本地短视频播放器，视频来自你的 Polydrive。\n点赞 / 收藏 / 观看历史只保存在本机，不上传。",
+                color = Color.White.copy(alpha = 0.75f),
+                fontSize = 13.sp,
+            )
+        },
+        containerColor = Color(0xFF101826),
+    )
+}
+
+/** 右侧操作栏按钮：白图标 + 下方小字计数 */
+@Composable
+private fun ActionItem(
+    icon: ImageVector,
+    desc: String,
+    tint: Color = Color.White,
+    count: String? = null,
+    onClick: () -> Unit,
+) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        IconButton(onClick = onClick, modifier = Modifier.size(48.dp)) {
+            Icon(icon, desc, tint = tint, modifier = Modifier.size(30.dp))
+        }
+        if (count != null) {
+            Text(count, color = Color.White, fontSize = 12.sp)
         }
     }
 }
@@ -416,6 +636,7 @@ private fun FeedPage(
     val scope = rememberCoroutineScope()
     val liked by remember(video.id) { store.isLiked(video.id) }.collectAsState(initial = false)
     val fav by remember(video.id) { store.isFav(video.id) }.collectAsState(initial = false)
+    val favTotal by remember { store.favorites() }.collectAsState(initial = emptyList())
 
     var playing by remember { mutableStateOf(false) }
     var buffering by remember { mutableStateOf(true) }
@@ -571,53 +792,48 @@ private fun FeedPage(
             }
         }
 
-        // TikTok 式右侧竖排操作栏
+        // 右侧竖排操作栏：白图标 + 下方小字计数
         if (isCurrent && errMsg == null) {
             Column(
-                modifier = Modifier.align(Alignment.BottomEnd)
-                    .padding(end = 10.dp, bottom = 190.dp),
+                modifier = Modifier.align(Alignment.CenterEnd)
+                    .padding(end = 8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    IconButton(onClick = { scope.launch { store.setLiked(video.id, !liked) } }) {
-                        Icon(
-                            if (liked) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
-                            "点赞",
-                            tint = if (liked) Color(0xFFFE2C55) else Color.White,
-                            modifier = Modifier.size(30.dp),
-                        )
-                    }
-                    Text(
-                        if (liked) "2" else "1",
-                        color = Color.White,
-                        fontSize = 12.sp,
-                    )
-                }
-                Spacer(Modifier.height(12.dp))
-                IconButton(onClick = { scope.launch { store.setFav(video.id, !fav) } }) {
-                    Icon(
-                        if (fav) Icons.Filled.Star else Icons.Filled.StarBorder,
-                        "收藏",
-                        tint = if (fav) Color(0xFFFFC107) else Color.White,
-                        modifier = Modifier.size(30.dp),
-                    )
-                }
-                Spacer(Modifier.height(12.dp))
-                IconButton(onClick = { downloadVideo(ctx, video) }) {
-                    Icon(Icons.Filled.Download, "下载", tint = Color.White, modifier = Modifier.size(28.dp))
-                }
-                Spacer(Modifier.height(12.dp))
-                IconButton(onClick = { shareVideo(ctx, video) }) {
-                    Icon(Icons.Filled.Share, "分享", tint = Color.White, modifier = Modifier.size(28.dp))
-                }
-                Spacer(Modifier.height(12.dp))
+                ActionItem(
+                    icon = if (liked) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                    desc = "点赞",
+                    tint = if (liked) Color(0xFFFE2C55) else Color.White,
+                    count = if (liked) "2" else "1",
+                    onClick = { scope.launch { store.setLiked(video.id, !liked) } },
+                )
+                Spacer(Modifier.height(14.dp))
+                ActionItem(
+                    icon = if (fav) Icons.Filled.Star else Icons.Filled.StarBorder,
+                    desc = "收藏",
+                    tint = if (fav) Color(0xFFFFC107) else Color.White,
+                    count = favTotal.size.toString(),
+                    onClick = { scope.launch { store.setFav(video.id, !fav) } },
+                )
+                Spacer(Modifier.height(14.dp))
+                ActionItem(
+                    icon = Icons.AutoMirrored.Filled.Redo,
+                    desc = "分享",
+                    onClick = { shareVideo(ctx, video) },
+                )
+                Spacer(Modifier.height(14.dp))
+                ActionItem(
+                    icon = Icons.Filled.Download,
+                    desc = "下载",
+                    onClick = { downloadVideo(ctx, video) },
+                )
+                Spacer(Modifier.height(14.dp))
                 TextButton(onClick = onSpeedClick) {
                     Text(speedLabel, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
 
-        // 底部：标题 + 大小 + 进度条
+        // 底部：时间 + 细进度条（可拖动）
         if (isCurrent && errMsg == null) {
             Column(
                 modifier = Modifier.align(Alignment.BottomCenter)
@@ -627,33 +843,26 @@ private fun FeedPage(
                             listOf(Color.Transparent, Color.Black.copy(alpha = 0.65f)),
                         ),
                     )
-                    .padding(horizontal = 12.dp)
-                    .padding(top = 28.dp, bottom = 16.dp),
+                    .padding(horizontal = 16.dp)
+                    .padding(top = 24.dp, bottom = NavBarReserve),
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Text(
-                    video.name,
-                    color = Color.White,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    fmtSize(video.size),
-                    color = Color.White.copy(alpha = 0.65f),
-                    fontSize = 12.sp,
-                )
-                Spacer(Modifier.height(8.dp))
                 val shownPos = if (seeking) seekPos else position
                 val durF = duration.toFloat().coerceAtLeast(1f)
+                Text(
+                    "${fmtFeedMs(shownPos)} / ${fmtFeedMs(duration)}",
+                    color = Color.White,
+                    fontSize = 13.sp,
+                )
+                Spacer(Modifier.height(2.dp))
                 Box(
-                    modifier = Modifier.fillMaxWidth().height(28.dp),
+                    modifier = Modifier.fillMaxWidth().height(26.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     LinearProgressIndicator(
                         progress = { (buffered.toFloat() / durF).coerceIn(0f, 1f) },
-                        modifier = Modifier.fillMaxWidth().height(4.dp)
-                            .clip(androidx.compose.foundation.shape.RoundedCornerShape(2.dp)),
+                        modifier = Modifier.fillMaxWidth().height(3.dp)
+                            .clip(RoundedCornerShape(2.dp)),
                         color = Color.White.copy(alpha = 0.35f),
                         trackColor = Color.Transparent,
                     )
@@ -674,11 +883,6 @@ private fun FeedPage(
                         ),
                         modifier = Modifier.fillMaxWidth(),
                     )
-                }
-                Row {
-                    Text(fmtFeedMs(shownPos), color = Color.White, fontSize = 12.sp)
-                    Text(" / ", color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp)
-                    Text(fmtFeedMs(duration), color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp)
                 }
             }
         }

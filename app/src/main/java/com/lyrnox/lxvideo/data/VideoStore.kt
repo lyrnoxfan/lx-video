@@ -63,6 +63,13 @@ class VideoStore private constructor(private val appCtx: Context) {
         }
     }
 
+    /** 点赞的视频 id 列表（用于"我"页统计获赞数） */
+    fun likedIds(): Flow<List<String>> = ds.data.map { p ->
+        p.asMap().entries
+            .filter { (k, v) -> k.name.startsWith("liked_") && v == true }
+            .map { (k, _) -> k.name.removePrefix("liked_") }
+    }
+
     /** 收藏的视频 id 列表 */
     fun favorites(): Flow<List<String>> = ds.data.map { p ->
         p.asMap().entries
