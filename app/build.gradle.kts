@@ -11,8 +11,8 @@ android {
         applicationId = "com.lyrnox.lxvideo"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.1.0"
         // 注意: 密码直接 baked 进 APK（用户明确要求免登录）。
         // APK 和本仓库必须保持私有，不得公开或转发。
         buildConfigField("String", "PD_SERVER", "\"https://polydrive.lyrnox.com\"")
@@ -84,6 +84,8 @@ dependencies {
     // 音视频播放
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.ui)
+    // 本地存储：点赞/收藏/历史/断点（DataStore Preferences，无代码生成）
+    implementation(libs.androidx.datastore.preferences)
 
     // 删掉 security-crypto 后 exifinterface 降级到 1.3.6（本地缓存只有 1.3.7），
     // 显式钉住 1.3.7，与老 App 解析结果一致
