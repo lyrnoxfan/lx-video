@@ -7,13 +7,10 @@ import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.net.Uri
 import android.os.Environment
+import android.view.ViewConfiguration
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -21,7 +18,8 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -45,8 +43,6 @@ import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.IosShare
@@ -84,7 +80,6 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -98,9 +93,13 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -126,7 +125,6 @@ import com.lyrnox.lxvideo.data.VideoItem
 import com.lyrnox.lxvideo.data.VideoStore
 import com.lyrnox.lxvideo.ui.theme.Blue
 import com.lyrnox.lxvideo.ui.theme.FavGold
-import com.lyrnox.lxvideo.ui.theme.LikeRed
 import com.lyrnox.lxvideo.ui.theme.PinkBlueBrush
 import com.lyrnox.lxvideo.ui.theme.Sub
 import com.lyrnox.lxvideo.ui.theme.TimeStyle
@@ -137,16 +135,7 @@ import com.lyrnox.lxvideo.util.fmtTime
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-
-/** 倍速档位：1x → 1.5x → 2x → 0.5x → 1x 循环 */
-private val SPEEDS = listOf(1f, 1.5f, 2f, 0.5f)
-
-private fun speedLabel(s: Float) = when (s) {
-    1f -> "1x"
-    1.5f -> "1.5x"
-    2f -> "2x"
-    else -> "0.5x"
-}
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** 底部悬浮导航预留，避免遮挡进度条 */
 private val NavBarReserve = 100.dp
@@ -214,7 +203,6 @@ fun VideoFeedScreen(
     val pagerState = rememberPagerState(pageCount = { videos.size })
     val page = pagerState.currentPage
     var lastPage by remember { mutableStateOf(0) }
-    var speedIdx by remember { mutableStateOf(0) }
 
     // 切页：先保存切走页面的进度；换 mediaItem；断点续播；自动播放；缩放重置回 1x
     LaunchedEffect(page, items) {
@@ -237,7 +225,8 @@ fun VideoFeedScreen(
         }
         items.getOrNull(page + 1)?.let { player.addMediaItem(it) }
         player.prepare()
-        player.playbackParameters = PlaybackParameters(SPEEDS[speedIdx])
+        // 切页重置为 1x（长按 2x 只在按住期间生效）
+        player.playbackParameters = PlaybackParameters(1f)
         player.playWhenReady = true
         vm.setIndex(page)
         lastPage = page
@@ -341,7 +330,7 @@ fun VideoFeedScreen(
 
     ModalNavigationDrawer(
         drawerState = drawerState,
-        // 不透的深色 scrim：防止底下视频页的控件（如点赞红心）透出虚影
+        // 不透的深色 scrim：防止底下视频页的控件透出虚影
         scrimColor = Color.Black.copy(alpha = 0.62f),
         drawerContent = {
             ModalDrawerSheet(
@@ -462,11 +451,7 @@ fun VideoFeedScreen(
                             store = store,
                             controlsVisible = controlsVisible,
                             onControlsChange = { controlsVisible = it },
-                            speedLabel = speedLabel(SPEEDS[speedIdx]),
-                            onSpeedClick = {
-                                speedIdx = (speedIdx + 1) % SPEEDS.size
-                                player.playbackParameters = PlaybackParameters(SPEEDS[speedIdx])
-                            },
+                            onEnterFullscreen = { onFullscreenChange(true) },
                             isFullscreen = isFullscreen,
                             fsControlsVisible = fsControlsVisible,
                             onFsControlsChange = { fsControlsVisible = it },
@@ -502,14 +487,6 @@ fun VideoFeedScreen(
                                 fontWeight = FontWeight.SemiBold,
                             )
                             Spacer(Modifier.weight(1f))
-                            IconButton(onClick = { onFullscreenChange(true) }) {
-                                Icon(
-                                    painterResource(R.drawable.ic_fullscreen),
-                                    "全屏",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(22.dp),
-                                )
-                            }
                             IconButton(onClick = { searching = true }) {
                                 Icon(Icons.Filled.Search, "搜索", tint = Color.White)
                             }
@@ -773,7 +750,7 @@ fun AboutDialog(onDismiss: () -> Unit) {
         },
         text = {
             Text(
-                "LX视频 v1.4.0\n本地短视频播放器，视频来自你的 Polydrive。\n点赞 / 收藏 / 观看历史只保存在本机，不上传。",
+                "LX视频 v1.6.0\n本地短视频播放器，视频来自你的 Polydrive。\n收藏 / 观看历史只保存在本机，不上传。",
                 color = Color.White.copy(alpha = 0.75f),
                 fontSize = 13.sp,
                 lineHeight = 20.sp,
@@ -787,7 +764,8 @@ fun AboutDialog(onDismiss: () -> Unit) {
 /** 右侧操作栏按钮：毛玻璃圆钮 + 下方小字计数，激活态带光晕 */
 @Composable
 private fun ActionItem(
-    icon: ImageVector,
+    icon: ImageVector? = null,
+    painter: Painter? = null,
     desc: String,
     tint: Color = Color.White,
     glow: Color? = null,
@@ -802,7 +780,11 @@ private fun ActionItem(
                 .pressScale(onClick = onClick),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(icon, desc, tint = tint, modifier = Modifier.size(26.dp))
+            if (painter != null) {
+                Icon(painter, desc, tint = tint, modifier = Modifier.size(26.dp))
+            } else if (icon != null) {
+                Icon(icon, desc, tint = tint, modifier = Modifier.size(26.dp))
+            }
         }
         if (count != null) {
             Spacer(Modifier.height(2.dp))
@@ -829,8 +811,7 @@ private fun FeedPage(
     store: VideoStore,
     controlsVisible: Boolean,
     onControlsChange: (Boolean) -> Unit,
-    speedLabel: String,
-    onSpeedClick: () -> Unit,
+    onEnterFullscreen: () -> Unit,
     isFullscreen: Boolean,
     fsControlsVisible: Boolean,
     onFsControlsChange: (Boolean) -> Unit,
@@ -839,7 +820,6 @@ private fun FeedPage(
 ) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
-    val liked by remember(video.id) { store.isLiked(video.id) }.collectAsState(initial = false)
     val fav by remember(video.id) { store.isFav(video.id) }.collectAsState(initial = false)
     val favTotal by remember { store.favorites() }.collectAsState(initial = emptyList())
 
@@ -851,7 +831,12 @@ private fun FeedPage(
     var seeking by remember { mutableStateOf(false) }
     var seekPos by remember { mutableLongStateOf(0L) }
     var errMsg by remember { mutableStateOf<String?>(null) }
-    var burst by remember { mutableStateOf(0) }
+
+    // 长按两侧 2x：播放区左/右约 1/3 宽区域长按 → 2x，松开恢复 1x
+    var boxW by remember { mutableStateOf(0) }
+    var boosting by remember { mutableStateOf(false) }
+    val haptic = LocalHapticFeedback.current
+    val viewConfig = remember(ctx) { ViewConfiguration.get(ctx) }
 
     // 播放中 3 秒无操作，控制层自动淡出；点按任意处唤回
     LaunchedEffect(controlsVisible, playing, isCurrent) {
@@ -911,11 +896,33 @@ private fun FeedPage(
 
     Box(
         modifier = Modifier.fillMaxSize()
+            .onSizeChanged { boxW = it.width }
             .pointerInput(isCurrent, errMsg, isFullscreen, fsControlsVisible) {
-                detectTapGestures(
-                    // 单击：全屏里只切换极简控制层；普通模式先唤出控制层，再播放/暂停
-                    onTap = {
-                        if (isCurrent && errMsg == null) {
+                // 单指手势：单击（播放/暂停）+ 两侧长按 2x。
+                // 双指/放大拖动由内层 ZoomableVideo 消费，这里只观察不消费，互不干扰。
+                awaitEachGesture {
+                    val down = awaitFirstDown()
+                    val w = boxW
+                    val inSide = w > 0 &&
+                        (down.position.x < w / 3f || down.position.x > w * 2f / 3f)
+                    val downPos = down.position
+                    val slop = viewConfig.scaledTouchSlop.toFloat()
+                    // 等待：超时=长按触发；提前松开=点按；位移超阈值/第二指按下=取消
+                    val tap = withTimeoutOrNull(500L) {
+                        var moved = false
+                        do {
+                            val event = awaitPointerEvent()
+                            val pressed = event.changes.filter { it.pressed }
+                            if (pressed.size > 1) return@withTimeoutOrNull "cancel"
+                            if (!moved && (pressed.firstOrNull()?.position?.minus(downPos)
+                                    ?.getDistance() ?: 0f) > slop
+                            ) moved = true
+                        } while (event.changes.any { it.pressed })
+                        if (moved) "cancel" else "tap"
+                    }
+                    when {
+                        tap == "tap" && isCurrent && errMsg == null -> {
+                            // 单击：全屏里只切换极简控制层；普通模式先唤出控制层，再播放/暂停
                             if (isFullscreen) {
                                 onFsControlsChange(!fsControlsVisible)
                             } else {
@@ -923,15 +930,19 @@ private fun FeedPage(
                                 player?.let { if (it.isPlaying) it.pause() else it.play() }
                             }
                         }
-                    },
-                    // 双击：点赞 + 弹性红心动画（缩放手势另行处理，不做双击缩放）
-                    onDoubleTap = {
-                        if (isCurrent && errMsg == null) {
-                            burst++
-                            scope.launch { store.setLiked(video.id, true) }
+                        tap == null && isCurrent && errMsg == null && inSide -> {
+                            // 两侧长按：切 2x + 触觉反馈，松开恢复 1x
+                            boosting = true
+                            player?.playbackParameters = PlaybackParameters(2f)
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            do {
+                                val event = awaitPointerEvent()
+                            } while (event.changes.any { it.pressed })
+                            boosting = false
+                            player?.playbackParameters = PlaybackParameters(1f)
                         }
-                    },
-                )
+                    }
+                }
             },
         contentAlignment = Alignment.Center,
     ) {
@@ -964,35 +975,21 @@ private fun FeedPage(
             }
         }
 
-        // 双击红心：弹性缩放 + 淡出
-        if (burst > 0) {
-            key(burst) {
-                val scale = remember { Animatable(0.2f) }
-                val alpha = remember { Animatable(1f) }
-                LaunchedEffect(Unit) {
-                    launch {
-                        scale.animateTo(
-                            1.15f,
-                            spring(
-                                dampingRatio = Spring.DampingRatioMediumBouncy,
-                                stiffness = Spring.StiffnessMediumLow,
-                            ),
-                        )
-                    }
-                    alpha.animateTo(0f, tween(550, delayMillis = 150))
-                }
-                Icon(
-                    Icons.Filled.Favorite,
-                    null,
-                    tint = LikeRed,
-                    modifier = Modifier.size(120.dp)
-                        .shadow(24.dp, CircleShape, ambientColor = LikeRed.copy(alpha = 0.55f))
-                        .graphicsLayer {
-                            scaleX = scale.value
-                            scaleY = scale.value
-                            this.alpha = alpha.value
-                        },
-                )
+        // 长按 2x 指示器：顶部中央，松开即消失
+        AnimatedVisibility(
+            visible = isCurrent && boosting && errMsg == null,
+            enter = fadeIn(tween(150)),
+            exit = fadeOut(tween(150)),
+            modifier = Modifier.align(Alignment.TopCenter),
+        ) {
+            Box(
+                modifier = Modifier.statusBarsPadding()
+                    .padding(top = 10.dp)
+                    .glassDark(999.dp, alpha = 0.55f)
+                    .padding(horizontal = 16.dp, vertical = 7.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("2x", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
             }
         }
 
@@ -1030,15 +1027,6 @@ private fun FeedPage(
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 ActionItem(
-                    icon = if (liked) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
-                    desc = "点赞",
-                    tint = if (liked) LikeRed else Color.White,
-                    glow = if (liked) LikeRed else null,
-                    count = if (liked) "2" else "1",
-                    onClick = { scope.launch { store.setLiked(video.id, !liked) } },
-                )
-                Spacer(Modifier.height(12.dp))
-                ActionItem(
                     icon = if (fav) Icons.Filled.Star else Icons.Filled.StarBorder,
                     desc = "收藏",
                     tint = if (fav) FavGold else Color.White,
@@ -1059,14 +1047,11 @@ private fun FeedPage(
                     onClick = { downloadVideo(ctx, video) },
                 )
                 Spacer(Modifier.height(12.dp))
-                Box(
-                    modifier = Modifier.size(50.dp)
-                        .glassDark(999.dp, alpha = 0.42f)
-                        .pressScale(onClick = onSpeedClick),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(speedLabel, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                }
+                ActionItem(
+                    painter = painterResource(R.drawable.ic_fullscreen),
+                    desc = "全屏",
+                    onClick = onEnterFullscreen,
+                )
             }
         }
 

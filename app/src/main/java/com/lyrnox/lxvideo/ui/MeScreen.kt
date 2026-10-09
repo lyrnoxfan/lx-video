@@ -68,7 +68,6 @@ fun MeScreen(
 ) {
     val ctx = LocalContext.current
     val store = remember(ctx) { VideoStore.get(ctx) }
-    val likedIds by remember { store.likedIds() }.collectAsState(initial = emptyList())
     val favIds by remember { store.favorites() }.collectAsState(initial = emptyList())
     val hist by remember { store.history() }.collectAsState(initial = emptyList())
     var showAbout by remember { mutableStateOf(false) }
@@ -145,7 +144,6 @@ fun MeScreen(
                     .glassDark(20.dp, alpha = 0.5f)
                     .padding(vertical = 16.dp),
             ) {
-                Stat("获赞", likedIds.size, Modifier.weight(1f))
                 Stat("收藏", favIds.size, Modifier.weight(1f))
                 Stat("观看", hist.size, Modifier.weight(1f))
             }
