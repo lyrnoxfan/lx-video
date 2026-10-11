@@ -81,7 +81,7 @@ class MainActivity : ComponentActivity() {
                     err = null
                     try {
                         val a = withContext(Dispatchers.IO) {
-                            Api(BuildConfig.PD_SERVER).also { it.login(BuildConfig.PD_PASSWORD) }
+                            Api(BuildConfig.PD_SERVER).also { if (BuildConfig.PD_PASSWORD.isNotEmpty()) it.login(BuildConfig.PD_PASSWORD) }
                         }
                         api = a
                     } catch (e: Exception) {
