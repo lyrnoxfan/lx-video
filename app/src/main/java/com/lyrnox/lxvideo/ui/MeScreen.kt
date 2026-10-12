@@ -111,7 +111,14 @@ fun MeScreen(
                     Box(
                         modifier = Modifier.fillMaxWidth()
                             .height(90.dp)
-                            .background(PinkBlueBrush.copy(alpha = 0.35f)),
+                            .background(
+                                Brush.horizontalGradient(
+                                    listOf(
+                                        Blue.copy(alpha = 0.35f),
+                                        Pink.copy(alpha = 0.35f),
+                                    ),
+                                ),
+                            ),
                     )
                 }
                 // 头像 + 昵称
