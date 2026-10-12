@@ -43,8 +43,6 @@ import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.History
-import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.IosShare
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.PlayArrow
@@ -67,8 +65,6 @@ import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.NavigationDrawerItemDefaults
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
@@ -237,8 +233,6 @@ fun VideoFeedScreen(
     var query by remember { mutableStateOf("") }
     var showList by remember { mutableStateOf(false) }
     var showLib by remember { mutableStateOf(false) }
-    var libTab by remember { mutableStateOf(0) }
-    var showAbout by remember { mutableStateOf(false) }
     // 控制层（顶栏/右侧栏/底部条）显隐：点按显示，播放中 3 秒无操作自动淡出
     var controlsVisible by remember { mutableStateOf(true) }
 
@@ -267,7 +261,6 @@ fun VideoFeedScreen(
         if (isFullscreen) {
             showList = false
             showLib = false
-            showAbout = false
             searching = false
             controlsVisible = false
             fsControlsVisible = true
@@ -319,11 +312,10 @@ fun VideoFeedScreen(
         }
     }
 
-    /** 打开抽屉里的列表弹窗：先关抽屉再弹 */
-    fun openSheet(tab: Int) {
+    /** 打开抽屉里的收藏弹窗：先关抽屉再弹 */
+    fun openSheet() {
         scope.launch {
             drawerState.close()
-            libTab = tab
             showLib = true
         }
     }
@@ -350,18 +342,31 @@ fun VideoFeedScreen(
                             ),
                         ),
                 ) {
-                // 抽屉头部：粉蓝渐变标题
-                Text(
-                    "LX视频",
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    style = TextStyle(
-                        brush = PinkBlueBrush,
-                    ),
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
+                // 抽屉头部：粉蓝渐变标题 + 装饰线
+                Column(
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 20.dp),
+                ) {
+                    Text(
+                        "LX视频",
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Bold,
+                        style = TextStyle(
+                            brush = PinkBlueBrush,
+                        ),
+                        letterSpacing = 1.sp,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Box(
+                        modifier = Modifier.width(36.dp).height(3.dp)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(PinkBlueBrush),
+                    )
+                }
+                HorizontalDivider(
+                    color = Color.White.copy(alpha = 0.08f),
+                    modifier = Modifier.padding(horizontal = 20.dp),
                 )
-                HorizontalDivider(color = Color.White.copy(alpha = 0.12f))
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(12.dp))
                 DrawerRow(
                     icon = Icons.Filled.Shuffle,
                     label = "播放顺序",
@@ -387,20 +392,7 @@ fun VideoFeedScreen(
                 DrawerRow(
                     icon = Icons.Filled.Star,
                     label = "我的收藏",
-                    onClick = { openSheet(0) },
-                )
-                DrawerRow(
-                    icon = Icons.Filled.History,
-                    label = "观看历史",
-                    onClick = { openSheet(1) },
-                )
-                DrawerRow(
-                    icon = Icons.Filled.Info,
-                    label = "关于",
-                    onClick = {
-                        scope.launch { drawerState.close() }
-                        showAbout = true
-                    },
+                    onClick = { openSheet() },
                 )
                 }
             }
@@ -479,13 +471,6 @@ fun VideoFeedScreen(
                             IconButton(onClick = { scope.launch { drawerState.open() } }) {
                                 Icon(Icons.Filled.Menu, "菜单", tint = Color.White)
                             }
-                            Spacer(Modifier.weight(1f))
-                            Text(
-                                "LX视频",
-                                color = Color.White.copy(alpha = 0.85f),
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.SemiBold,
-                            )
                             Spacer(Modifier.weight(1f))
                             IconButton(onClick = { searching = true }) {
                                 Icon(Icons.Filled.Search, "搜索", tint = Color.White)
@@ -579,25 +564,14 @@ fun VideoFeedScreen(
                 }
             }
 
-            // 收藏 / 历史二合一弹窗
+            // 收藏弹窗
             if (showLib && videos.isNotEmpty()) {
                 VideoListSheet(
-                    title = null,
+                    title = "我的收藏",
                     onDismiss = { showLib = false },
                 ) {
                     item {
-                        TabRow(
-                            selectedTabIndex = libTab,
-                            containerColor = Color.Transparent,
-                            contentColor = Color.White,
-                        ) {
-                            Tab(selected = libTab == 0, onClick = { libTab = 0 }, text = { Text("收藏") })
-                            Tab(selected = libTab == 1, onClick = { libTab = 1 }, text = { Text("历史") })
-                        }
-                    }
-                    item {
                         LibEntries(
-                            tab = libTab,
                             videos = videos,
                             store = store,
                             onPick = { jumpTo(it) },
@@ -605,10 +579,6 @@ fun VideoFeedScreen(
                     }
                     item { Spacer(Modifier.height(24.dp)) }
                 }
-            }
-
-            if (showAbout) {
-                AboutDialog(onDismiss = { showAbout = false })
             }
         }
     }
@@ -625,26 +595,56 @@ private fun DrawerRow(
     NavigationDrawerItem(
         label = {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(label, color = Color.White, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                Text(
+                    label,
+                    color = Color.White.copy(alpha = 0.92f),
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.weight(1f),
+                )
                 if (trailing != null) {
-                    // 状态文字用粉蓝渐变
-                    Text(
-                        trailing,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium,
-                        style = TextStyle(brush = PinkBlueBrush),
-                    )
+                    // 状态胶囊：粉蓝渐变描边
+                    Box(
+                        modifier = Modifier
+                            .border(
+                                1.dp,
+                                PinkBlueBrush,
+                                RoundedCornerShape(999.dp),
+                            )
+                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                    ) {
+                        Text(
+                            trailing,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            style = TextStyle(brush = PinkBlueBrush),
+                        )
+                    }
                 }
             }
         },
-        icon = { Icon(icon, null, tint = Color.White.copy(alpha = 0.85f), modifier = Modifier.size(24.dp)) },
+        icon = {
+            // 图标底：柔和圆角方块
+            Box(
+                modifier = Modifier.size(38.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color.White.copy(alpha = 0.08f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    icon,
+                    null,
+                    tint = Color.White.copy(alpha = 0.9f),
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+        },
         selected = false,
         onClick = onClick,
         colors = NavigationDrawerItemDefaults.colors(
             unselectedContainerColor = Color.Transparent,
         ),
-        // 统一 56dp 行高；按压涟漪为 NavigationDrawerItem 内置反馈
-        modifier = Modifier.padding(horizontal = 8.dp).height(56.dp),
+        modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp).height(60.dp),
     )
 }
 
@@ -683,82 +683,31 @@ private fun VideoListSheet(
     }
 }
 
-/** 收藏/历史条目列表（供抽屉弹窗和"我"页复用逻辑） */
+/** 收藏条目列表（抽屉弹窗用） */
 @Composable
 private fun LibEntries(
-    tab: Int,
     videos: List<VideoItem>,
     store: VideoStore,
     onPick: (String) -> Unit,
 ) {
     val favIds by remember { store.favorites() }.collectAsState(initial = emptyList())
-    val hist by remember { store.history() }.collectAsState(initial = emptyList())
-    if (tab == 0) {
-        val favs = remember(favIds, videos) {
-            favIds.mapNotNull { id -> videos.find { it.id == id } }
-        }
-        if (favs.isEmpty()) {
-            EmptyHint("还没有收藏")
-        } else {
-            favs.forEach { v ->
-                VideoEntryRow(
-                    title = v.name,
-                    subtitle = fmtSize(v.size),
-                    onClick = { onPick(v.id) },
-                    trailing = {
-                        Icon(Icons.Filled.Star, null, tint = Color(0xFFFFC107), modifier = Modifier.size(18.dp))
-                    },
-                )
-            }
-        }
+    val favs = remember(favIds, videos) {
+        favIds.mapNotNull { id -> videos.find { it.id == id } }
+    }
+    if (favs.isEmpty()) {
+        EmptyHint("还没有收藏")
     } else {
-        val hs = remember(hist, videos) {
-            hist.mapNotNull { h -> videos.find { it.id == h.id }?.let { it to h } }
-        }
-        if (hs.isEmpty()) {
-            EmptyHint("还没有观看历史")
-        } else {
-            hs.forEach { (v, h) ->
-                val sub = buildString {
-                    append(fmtSize(v.size))
-                    append("  ·  ${fmtTime(h.ts)}")
-                    if (h.pos > 5000) append("  ·  看到 ${fmtFeedMs(h.pos)}")
-                }
-                VideoEntryRow(
-                    title = v.name,
-                    subtitle = sub,
-                    onClick = { onPick(v.id) },
-                )
-            }
+        favs.forEach { v ->
+            VideoEntryRow(
+                title = v.name,
+                subtitle = fmtSize(v.size),
+                onClick = { onPick(v.id) },
+                trailing = {
+                    Icon(Icons.Filled.Star, null, tint = Color(0xFFFFC107), modifier = Modifier.size(18.dp))
+                },
+            )
         }
     }
-}
-
-/** 关于弹窗：只说真实情况，不虚构功能 */
-@Composable
-fun AboutDialog(onDismiss: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        confirmButton = {
-            GlassTextButton("知道了", onClick = onDismiss)
-        },
-        title = {
-            Text(
-                "关于",
-                style = TextStyle(brush = PinkBlueBrush, fontWeight = FontWeight.Bold, fontSize = 18.sp),
-            )
-        },
-        text = {
-            Text(
-                "LX视频 v1.6.0\n本地短视频播放器，视频来自你的 Polydrive。\n收藏 / 观看历史只保存在本机，不上传。",
-                color = Color.White.copy(alpha = 0.75f),
-                fontSize = 13.sp,
-                lineHeight = 20.sp,
-            )
-        },
-        containerColor = Color(0xFF0D1420).copy(alpha = 0.96f),
-        shape = RoundedCornerShape(24.dp),
-    )
 }
 
 /** 右侧操作栏按钮：毛玻璃圆钮 + 下方小字计数，激活态带光晕 */

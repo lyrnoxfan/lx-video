@@ -11,8 +11,8 @@ android {
         applicationId = "com.lyrnox.lxvideo"
         minSdk = 26
         targetSdk = 36
-        versionCode = 12
-        versionName = "1.8.1"
+        versionCode = 13
+        versionName = "1.8.2"
         // 注意: 密码直接 baked 进 APK（用户明确要求免登录）。
         // APK 和本仓库必须保持私有，不得公开或转发。
         buildConfigField("String", "PD_SERVER", "\"http://3.0.203.160:8080\"")
