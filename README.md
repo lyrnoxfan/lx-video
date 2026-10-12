@@ -25,29 +25,98 @@
 - DataStore（本地存储）
 - Material3 + 液态玻璃风 UI
 
-## 视频源
+## 打造你自己的视频源
 
-App 通过 HTTP API 获取视频列表（`/api/videos` 返回 JSON），视频文件走 HTTP Range 分片流式加载，支持拖动秒切。
+App 本身不带视频，视频来自你自己的服务器。原理很简单：
 
-默认配置指向示例服务器，实际使用时改成你自己的：
+```
+你的服务器          App
+  /media/  ←——  视频文件直链（MP4）
+  /api/videos  ←——  视频列表 JSON
+```
 
-1. 复制 `local.properties.example` 为 `local.properties`（如果没有就新建）
-2. 填入你的服务器地址：
+### 第 1 步：准备一台服务器
+
+任意 VPS/云主机，有公网 IP 就行。以下用 Debian + nginx 举例。
+
+### 第 2 步：放视频文件
+
+把 MP4 传到服务器，比如 `/var/www/videos/`：
+
+```bash
+mkdir -p /var/www/videos
+# 把你的 mp4 传进来（scp / rsync / 网盘都行）
+```
+
+### 第 3 步：生成视频列表 JSON
+
+在服务器上跑这个 Python 脚本，扫描目录生成 `/api/videos` 要的 JSON：
+
+```python
+#!/usr/bin/env python3
+"""扫描视频目录，生成 videos.json"""
+import json, os
+
+VIDEO_DIR = "/var/www/videos"
+BASE_URL = "http://你的服务器IP:8080"  # 改成你的
+
+videos = []
+for i, fn in enumerate(sorted(os.listdir(VIDEO_DIR))):
+    if not fn.lower().endswith((".mp4", ".mkv", ".webm", ".mov")):
+        continue
+    fp = os.path.join(VIDEO_DIR, fn)
+    videos.append({
+        "id": f"v{i}",
+        "name": fn,
+        "size": os.path.getsize(fp),
+        "url": f"{BASE_URL}/media/{fn}",
+    })
+
+with open("/var/www/videos.json", "w") as f:
+    json.dump(videos, f, ensure_ascii=False)
+print(f"共 {len(videos)} 个视频")
+```
+
+### 第 4 步：配 nginx
+
+```nginx
+server {
+    listen 8080;
+    # 视频文件：支持 Range 分片（拖动秒切就靠它）
+    location /media/ {
+        alias /var/www/videos/;
+    }
+    # 视频列表 API
+    location = /api/videos {
+        alias /var/www/videos.json;
+        # 或者用 alias + try_files，根据你的 nginx 版本调整
+    }
+}
+```
+
+确保 `http://你的服务器IP:8080/api/videos` 能返回 JSON，
+`http://你的服务器IP:8080/media/xxx.mp4` 能下载视频。
+
+### 第 5 步：App 填服务器地址
+
+在项目根目录建 `local.properties`（已 gitignore，不会提交）：
 
 ```properties
-PD_SERVER=http://你的服务器:8080
+PD_SERVER=http://你的服务器IP:8080
 PD_PASSWORD=
 ```
 
-`PD_PASSWORD` 为空时跳过登录（适用于无鉴权服务器）。
+- `PD_SERVER`：你的服务器地址（注意 `http://` 开头，App 已允许明文流量）
+- `PD_PASSWORD`：如果你的 API 需要登录才填，否则留空跳过
 
-API 格式参考：
+### 加新视频
 
-```json
-[
-  { "id": "abc123", "name": "视频名.mp4", "size": 12345678, "url": "/media/视频名.mp4" }
-]
-```
+以后加视频只需两步：
+
+1. 把新 MP4 传到服务器的视频目录
+2. 重新跑一遍上面的 Python 脚本更新 `videos.json`
+
+App 下次启动自动拉取新列表，不用重新打包。
 
 ## 构建
 
