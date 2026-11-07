@@ -113,8 +113,10 @@ import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import com.lyrnox.lxvideo.BuildConfig
 import com.lyrnox.lxvideo.R
 import com.lyrnox.lxvideo.data.PlayerCache
+import com.lyrnox.lxvideo.data.basicAuthHeader
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.lyrnox.lxvideo.data.VideoItem
@@ -173,9 +175,18 @@ fun VideoFeedScreen(
         val cacheFactory = CacheDataSource.Factory()
             .setCache(PlayerCache.get(ctx.applicationContext))
             .setUpstreamDataSourceFactory(
-                DefaultHttpDataSource.Factory().setUserAgent(
-                    "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36 LXVideo/1.3.1"
-                )
+                DefaultHttpDataSource.Factory()
+                    .setUserAgent(
+                        "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36 LXVideo/1.3.1"
+                    )
+                    .apply {
+                        // 播放也要带 Basic Auth，否则 /media/ 会 401。
+                        if (BuildConfig.PD_PASSWORD.isNotEmpty()) {
+                            setDefaultRequestProperties(
+                                mapOf("Authorization" to basicAuthHeader(BuildConfig.PD_PASSWORD))
+                            )
+                        }
+                    }
             )
         ExoPlayer.Builder(ctx)
             .setLoadControl(loadControl)

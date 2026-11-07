@@ -28,12 +28,27 @@ private class MemoryCookieJar : CookieJar {
     }
 }
 
+/** nginx Basic Auth（用户名固定 lx，密码即 PD_PASSWORD，baked 进 APK）。
+ * 只防扫、防猜、防路人：APK 被反编译仍能拿到密码，不防 APK 泄露。 */
+fun basicAuthHeader(password: String): String {
+    val raw = "lx:$password".toByteArray(Charsets.UTF_8)
+    return "Basic " + java.util.Base64.getEncoder().encodeToString(raw)
+}
+
 /** polydrive Worker API 客户端（视频 App 只需要登录 + 视频列表） */
-class Api(baseUrl: String) {
+class Api(baseUrl: String, password: String = "") {
     private val base = baseUrl.trimEnd('/')
 
     private val client: OkHttpClient = OkHttpClient.Builder()
         .cookieJar(MemoryCookieJar())
+        .addInterceptor { chain ->
+            val req = if (password.isNotEmpty()) {
+                chain.request().newBuilder()
+                    .header("Authorization", basicAuthHeader(password))
+                    .build()
+            } else chain.request()
+            chain.proceed(req)
+        }
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(180, TimeUnit.SECONDS)
         .writeTimeout(180, TimeUnit.SECONDS)

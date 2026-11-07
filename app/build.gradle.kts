@@ -11,12 +11,14 @@ android {
         applicationId = "com.lyrnox.lxvideo"
         minSdk = 26
         targetSdk = 36
-        versionCode = 13
-        versionName = "1.8.2"
+        versionCode = 14
+        versionName = "1.8.3"
         // 注意: 密码直接 baked 进 APK（用户明确要求免登录）。
         // APK 和本仓库必须保持私有，不得公开或转发。
-        buildConfigField("String", "PD_SERVER", "\"http://3.0.203.160:8080\"")
-        buildConfigField("String", "PD_PASSWORD", "\"\"")
+        // v1.8.3：PD_SERVER 改固定域名 video.lyrnox.com；PD_PASSWORD 为 nginx Basic Auth
+        // 密码（用户名 lx），防扫/防猜，不防 APK 被反编译。
+        buildConfigField("String", "PD_SERVER", "\"http://video.lyrnox.com:8080\"")
+        buildConfigField("String", "PD_PASSWORD", "\"MhFDqWPY5ZVKrHAl0Y5clmBEdoy6mMXa\"")
     }
 
     buildTypes {

@@ -81,7 +81,9 @@ class MainActivity : ComponentActivity() {
                     err = null
                     try {
                         val a = withContext(Dispatchers.IO) {
-                            Api(BuildConfig.PD_SERVER).also { if (BuildConfig.PD_PASSWORD.isNotEmpty()) it.login(BuildConfig.PD_PASSWORD) }
+                            // 静态 nginx 没有 /api/login：Basic Auth 随每个请求带，不用登录。
+                            // 401 会在拉列表时抛 UnauthorizedException，走 onUnauthorized。
+                            Api(BuildConfig.PD_SERVER, BuildConfig.PD_PASSWORD)
                         }
                         api = a
                     } catch (e: Exception) {
